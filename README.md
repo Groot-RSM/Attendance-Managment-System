@@ -1,39 +1,61 @@
 # Smart Fingerprint-Based Attendance and Data Management System
 
-## Overview
-The **Smart Fingerprint-Based Attendance System** is a low-cost, standalone, secure, and automated attendance solution built around an ESP32. It combines biometric authentication, local data storage, accurate time tracking, and wireless data management to seamlessly track student attendance.
+The **Smart Fingerprint-Based Attendance System** is a comprehensive, low-cost, standalone, and automated biometric attendance solution built around an ESP32. It combines biometric authentication, local data storage, accurate time tracking, and wireless data management to seamlessly track student attendance.
 
 The main idea is to identify students using their unique fingerprints and automatically record their attendance along with the exact time. This reduces manual work and prevents repeated or incorrect attendance entries.
 
-## Hardware Components
-- **ESP32 Microcontroller**: Serves as the central processing unit, providing Wi-Fi and Bluetooth connectivity.
-- **Fingerprint Sensor (R307/Similar)**: Enrolls and identifies students based on their unique fingerprints.
-- **SD Card Module**: Stores attendance records locally in CSV format, ensuring data is not lost and can be accessed without a network.
-- **OLED Display (SH1106G)**: Provides visual feedback on system status, enrollment steps, and successful/failed scans.
-- **LED Indicators**: Bi-color (Red/Green) LEDs offer immediate visual confirmation of authentication status.
+## Key Features
+- **Biometric Authentication:** Uses a fingerprint scanner for user enrollment and verification.
+- **Adaptive Template Retraining:** A companion mobile app automatically analyzes recent successful scans and updates the ESP32's stored template to improve future scan accuracy.
+- **OLED Display & LEDs:** Real-time feedback and menu system using an Adafruit SH1106G 128x64 display and Red/Green status LEDs.
+- **Keypad Input:** 4x4 matrix keypad to navigate menus and input IDs.
+- **SD Card Logging:** Saves fingerprint templates and daily attendance logs locally in CSV format.
+- **Web Server:** Connects to Wi-Fi and hosts a local webpage to download attendance CSV files over the local network.
+- **BLE Connectivity:** Supports Nordic UART Service (NUS) to list, download, and upload files wirelessly over Bluetooth.
+- **NTP Time Sync:** Automatically syncs the time to ensure logs are accurately time-stamped.
+- **Cloud Sync:** The mobile app syncs local attendance data to Firebase for centralized access, reporting, and management.
+
+## Hardware Components & Wiring
+
+![Hardware Wiring Diagram](wiring_diagram.jpg)
+
+| Component | Pin / Interface | ESP32 Pin |
+|-----------|----------------|-----------|
+| **OLED Display** | I2C SDA | GPIO 21 |
+| | I2C SCL | GPIO 22 |
+| **SD Card Module** | SPI CS | GPIO 5 |
+| | SPI MOSI | GPIO 23 |
+| | SPI MISO | GPIO 19 |
+| | SPI SCK | GPIO 18 |
+| **Fingerprint Scanner** | Serial TX | GPIO 16 (RX2) |
+| | Serial RX | GPIO 17 (TX2) |
+| **4x4 Keypad** | Row 1, 2, 3, 4 | GPIO 13, 12, 14, 27 |
+| | Col 1, 2, 3, 4 | GPIO 26, 25, 33, 32 |
+| **Bi-Color / Status LEDs**| RED LED | GPIO 15 |
+| | GREEN LED | GPIO 4 |
 
 ## Software Architecture
+
 The system consists of two main software components:
 
 ### 1. ESP32 Firmware (C++)
-The firmware manages the hardware peripherals and handles the core logic of the attendance system:
-- **Enrollment Mode**: Registers new fingerprints and saves them securely in the sensor's memory, backing up templates to the SD card.
-- **Attendance Mode**: Actively scans for fingerprints, cross-references them with enrolled users, and logs successful matches to a daily CSV file on the SD card with accurate timestamps via NTP.
-- **Web Server**: Hosts a local web page over Wi-Fi, allowing users to download the CSV attendance logs directly from the SD card.
-- **BLE Server**: Implements Nordic UART Service (NUS) to facilitate wireless data transfer (uploading/downloading files) to a companion mobile application.
+The firmware manages the hardware peripherals using a state machine architecture:
+- **State Management (`loop()`):** The software runs on a state machine (`SystemState`) managing transitions between the Main Menu, Enrollment Mode, Attendance Mode, and Raw Template extraction. Input is continuously monitored from both the 4x4 keypad and the Serial connection.
+- **Biometrics & Security (`Adafruit_Fingerprint.h`):** The `getFingerprintEnroll()` function securely captures a fingerprint by requiring two matching scans before generating a mathematical template and saving it to the sensor's non-volatile memory. `checkAttendance()` continuously polls the scanner to find matches in the local database.
+- **Data Logging & SD Card (`SD.h`):** When a user is identified, their attendance is logged to a CSV file on the SD card. Newly scanned templates are also logged for adaptive retraining.
+- **Wi-Fi & Web Server (`WebServer.h`):** The ESP32 connects to Wi-Fi and hosts a lightweight web server on port 80. The root URL (`/`) serves an HTML page dynamically generated by listing all `.csv` files stored on the SD card, allowing users to download logs over the local network.
+- **Bluetooth Low Energy (BLE):** Implements a Nordic UART Service (NUS) profile for wireless communication. Custom Characteristic Callbacks handle chunked commands (`CMD:LIST_FILES`, `CMD:GET_FILE`, `CMD:PUT_FILE`) to securely transfer large payload data (raw hex streams or CSV files) over small MTU packets.
+- **Time Synchronization:** Utilizes `time.h` paired with NTP to fetch accurate real-world time over Wi-Fi.
 
 ### 2. Companion Mobile Application (Flutter)
-A cross-platform mobile application that interfaces with the ESP32 via Bluetooth Low Energy (BLE) and Firebase:
-- **Device Synchronization**: Connects to the ESP32 via BLE to fetch scanned templates and attendance logs wirelessly without removing the SD card.
-- **Adaptive Template Retraining**: Automatically analyzes recent successful fingerprint scans, compares them with the original template, and updates the ESP32's stored template to improve future scan accuracy.
-- **Data Management**: Syncs attendance data to Firebase for centralized access, reporting, and management.
-- **User Interface**: Provides an intuitive dashboard for teachers and admins to view student records, attendance reports, and manage hardware configurations.
+A cross-platform mobile application that interfaces with the ESP32 via BLE and Firebase:
+- **Device Synchronization:** Connects to "ESP32 Gate" via BLE to fetch scanned templates and attendance logs wirelessly without removing the SD card.
+- **Adaptive Retraining Algorithm:** Automatically analyzes recent successful fingerprint scans, compares them byte-by-byte with the original template, and generates an optimized template (medoid). It then uploads this `optimized_templates.csv` back to the ESP32.
+- **Data Management & Firebase:** Syncs local attendance data to Firebase Cloud Firestore for centralized access and reporting.
+- **User Interface:** Provides an intuitive dashboard for teachers and admins to view student records, manage classes, and interact with the hardware.
 
-## Features
-- **Standalone Operation**: Functions completely offline for scanning and logging using the SD card and RTC/NTP time.
-- **Wireless Syncing**: Eliminates the need to physically remove the SD card by utilizing a local Web Server and BLE for file transfers.
-- **Adaptive Biometric Accuracy**: The mobile app continuously optimizes templates to prevent false rejections over time.
-- **Instant Feedback**: OLED display and Red/Green LEDs provide immediate confirmation of actions.
+## Python Utility
+A `read_serial.py` script is included to interface with the ESP32 via serial. It automatically connects and can programmatically request fingerprint templates without needing the Arduino IDE Serial Monitor.
 
 ## Setup & Installation
 
@@ -49,7 +71,9 @@ A cross-platform mobile application that interfaces with the ESP32 via Bluetooth
 3. Run `flutter build apk --release` to generate the release APK for Android.
 4. Install the generated APK on your Android device.
 
-## Usage
-- **Boot Up**: The ESP32 will connect to Wi-Fi, sync time with NTP, and initialize the BLE server and web server.
-- **Serial/Keypad Menu**: Choose between Enroll (1), Attendance (2), View Raw (3), or Clear Database (4).
-- **Mobile Sync**: Open the app, connect to "ESP32 Gate" via Bluetooth, and synchronize records or update optimized templates.
+## System Modes / Usage
+1. **Enrollment Mode:** Register a new user ID (1-1000) and scan their fingerprint twice to generate a robust template.
+2. **Attendance Mode:** Actively scans for fingerprints and logs verified matches to the SD card, triggering the Green LED.
+3. **View Raw Template:** Output the raw hex data of a fingerprint template over the Serial Monitor.
+4. **Clear Database:** Wipes all saved fingerprints from the sensor and the SD card backup.
+5. **Mobile Sync:** Open the Flutter app, connect via Bluetooth, and synchronize records or update optimized templates.
